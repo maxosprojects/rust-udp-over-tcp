@@ -7,7 +7,7 @@ use err_context::{BoxedErrorExt as _, ErrorExt as _, ResultExt as _};
 use std::convert::Infallible;
 use std::fmt;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
@@ -37,7 +37,7 @@ pub struct Options {
 
     /// Which local IP to bind the UDP socket to.
     #[cfg_attr(feature = "clap", arg(long = "udp-bind"))]
-    pub udp_bind_ip: Option<IpAddr>,
+    pub udp_bind_addr: Option<SocketAddr>,
 
     #[cfg_attr(feature = "clap", clap(flatten))]
     pub tcp_options: crate::tcp_options::TcpOptions,
@@ -72,7 +72,7 @@ impl Options {
         Options {
             tcp_listen_addrs,
             udp_forward_addr,
-            udp_bind_ip: None,
+            udp_bind_addr: None,
             tcp_options: Default::default(),
             #[cfg(feature = "statsd")]
             statsd_host: None,
@@ -145,9 +145,9 @@ pub async fn run(options: Options) -> Result<Infallible, Tcp2UdpError> {
         return Err(Tcp2UdpError::NoTcpListenAddrs);
     }
 
-    let udp_bind_ip = options.udp_bind_ip.unwrap_or_else(|| {
+    let udp_bind_ip = options.udp_bind_addr.unwrap_or_else(|| {
         if options.udp_forward_addr.is_ipv4() {
-            "0.0.0.0".parse().unwrap()
+            "0.0.0.0:0".parse().unwrap()
         } else {
             "::".parse().unwrap()
         }
@@ -213,7 +213,7 @@ fn create_listening_socket(
 
 async fn process_tcp_listener(
     tcp_listener: TcpListener,
-    udp_bind_ip: IpAddr,
+    udp_bind_addr: SocketAddr,
     udp_forward_addr: SocketAddr,
     tcp_recv_timeout: Option<Duration>,
     tcp_nodelay: bool,
@@ -234,7 +234,7 @@ async fn process_tcp_listener(
                     if let Err(error) = process_socket(
                         tcp_stream,
                         tcp_peer_addr,
-                        udp_bind_ip,
+                        udp_bind_addr,
                         udp_forward_addr,
                         tcp_recv_timeout,
                     )
@@ -267,11 +267,11 @@ async fn process_tcp_listener(
 async fn process_socket(
     tcp_stream: TcpStream,
     tcp_peer_addr: SocketAddr,
-    udp_bind_ip: IpAddr,
+    udp_bind_addr: SocketAddr,
     udp_peer_addr: SocketAddr,
     tcp_recv_timeout: Option<Duration>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let udp_bind_addr = SocketAddr::new(udp_bind_ip, 0);
+    let udp_bind_addr = SocketAddr::new(udp_bind_addr.ip(), udp_bind_addr.port());
 
     let udp_socket = UdpSocket::bind(udp_bind_addr)
         .await
